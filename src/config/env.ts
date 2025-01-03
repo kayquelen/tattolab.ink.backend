@@ -40,8 +40,7 @@ const configSchema = z.object({
     port: z.number()
   }),
   replicateToken: z.string().min(1, 'Replicate API token is required')
-  replicateToken: process.env.REPLICATE_TOKEN
-  })
+})
 
 export const config = configSchema.parse({
   supabase: {
@@ -55,7 +54,5 @@ export const config = configSchema.parse({
   server: {
     port: Number(process.env.PORT)
   },
-  replicate: {
-    apiToken: process.env.REPLICATE_API_TOKEN
-  }
+  replicateToken: process.env.REPLICATE_TOKEN
 })

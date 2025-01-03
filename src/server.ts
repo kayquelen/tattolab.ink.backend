@@ -1,19 +1,26 @@
-import Fastify from 'fastify';
+import Fastify, { FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import { config } from './config/env.js';
 import { LoggerService } from './services/logger.service.js';
 import downloadRoutes from './routes/downloads.js';
 import aiRoutes from './routes/ai.routes.js';
 import { supabase } from './lib/supabase.js';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, User } from '@supabase/supabase-js';
 import replicateConfig from './config/replicate.js';
 
-// 1. Inicializar Fastify
+// Extender o tipo Request do Fastify para incluir o user
+declare module 'fastify' {
+  interface FastifyRequest {
+    user: User;
+  }
+}
+
+// Inicializar Fastify
 const fastify = Fastify({
   logger: true
 });
 
-// 2. Registrar Supabase como decorador
+// Registrar Supabase como decorador
 fastify.decorate('supabase', createClient(
   config.supabase.url,
   config.supabase.serviceRoleKey,
@@ -43,31 +50,36 @@ console.log('Supabase Config:', {
   }
 });
 
-// 3. Configurar parser JSON (sem os ":")
-fastify.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+// Configurar parser JSON com tipos corretos
+fastify.addContentTypeParser('application/json', { parseAs: 'string' }, (req: FastifyRequest, body: string, done) => {
   try {
     const json = JSON.parse(body);
     done(null, json);
   } catch (err) {
-    done(err);
+    done(err as Error); // Type assertion para Error
   }
 });
 
-// 3. Configurar CORS
+// Configurar CORS
 await fastify.register(cors, {
   origin: [
     'http://localhost:5173',
-    'http://localhost:3000'
+    'http://localhost:3000',
+    'https://www.tattoolab.ink'
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 });
 
-// Adicionar antes do CORS
+// Adicionar config como decorador
 fastify.decorate('config', config);
 
-// Authentication middleware
+// Authentication middleware com tipos corretos
+interface AuthError extends Error {
+  message: string;
+}
+
 fastify.addHook('onRequest', async (request, reply) => {
   try {
     const authHeader = request.headers.authorization;
@@ -75,7 +87,6 @@ fastify.addHook('onRequest', async (request, reply) => {
       throw new Error('No authorization header');
     }
 
-    // Extrair apenas o token, removendo qualquer prefixo
     const token = authHeader.split('Bearer').pop()?.trim();
     if (!token) {
       throw new Error('No token provided');
@@ -84,13 +95,11 @@ fastify.addHook('onRequest', async (request, reply) => {
     console.log('Auth Header:', authHeader);
     console.log('Extracted Token:', token);
 
-    // Criar um novo cliente Supabase
     const supabaseClient = createClient(
       config.supabase.url,
       config.supabase.serviceRoleKey
     );
 
-    // Verificar o token
     const { data: { user }, error } = await supabaseClient.auth.getUser(token);
 
     console.log('User:', user);
@@ -100,14 +109,14 @@ fastify.addHook('onRequest', async (request, reply) => {
       throw new Error('Invalid user token');
     }
 
-    // Attach user to request
     request.user = user;
 
-  } catch (error) {
-    console.error('Auth error:', error);
+  } catch (error: unknown) {
+    const authError = error as AuthError;
+    console.error('Auth error:', authError);
     reply.code(401).send({
       error: 'unauthorized',
-      message: error.message
+      message: authError.message || 'Authentication failed'
     });
   }
 });
@@ -133,7 +142,8 @@ fastify.get('/health', async () => {
 try {
   await fastify.listen({ port: config.server.port, host: '0.0.0.0' });
   LoggerService.info(`Server listening on port ${config.server.port}`);
-} catch (err) {
-  LoggerService.error('Error starting server', err);
+} catch (err: unknown) {
+  const error = err as Error;
+  LoggerService.error('Error starting server', error);
   process.exit(1);
 }

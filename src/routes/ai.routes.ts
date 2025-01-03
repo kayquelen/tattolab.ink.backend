@@ -1,6 +1,24 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest } from 'fastify';
 import { ReplicateService } from '../services/replicate.service.js';
 import { LoggerService } from '../services/logger.service.js';
+import { Database } from '../types/database';
+
+// Tipos para as requisições
+type Generation = Database['public']['Tables']['ai_generations']['Row'];
+type GenerationInput = Database['public']['Tables']['ai_generations']['Insert'];
+
+interface GenerateRequest {
+  Body: {
+    prompt: string;
+    negative_prompt?: string;
+    width?: number;
+    height?: number;
+    num_inference_steps?: number;
+    guidance_scale?: number;
+    high_noise_frac?: number;
+    apply_watermark?: boolean;
+  }
+}
 
 const generateSchema = {
   body: {
@@ -23,20 +41,20 @@ export default async function aiRoutes(fastify: FastifyInstance) {
   const service = new ReplicateService(fastify);
 
   // Rota para gerar imagem
-  fastify.post('/generate', {
+  fastify.post<GenerateRequest>('/generate', {
     schema: generateSchema,
     handler: async (request, reply) => {
       try {
         const userId = request.user.id;
         LoggerService.info('Generate request received:', { userId, body: request.body });
 
-        const result = await service.generateImage(request.body, userId);
+        const result = await service.generateImage(request.body as GenerationInput, userId);
         return reply.send(result);
-      } catch (error) {
+      } catch (error: any) {
         LoggerService.error('Generate route error:', error);
         return reply.code(500).send({
           error: 'generation_failed',
-          message: error.message || 'Failed to generate image'
+          message: error?.message || 'Failed to generate image'
         });
       }
     }
@@ -53,12 +71,11 @@ export default async function aiRoutes(fastify: FastifyInstance) {
           timestamp: new Date().toISOString()
         });
 
-        // Corrigindo o nome da tabela para ai_generations
         const { data: generations, error } = await fastify.supabase
-          .from("ai_generations")
-          .select("*")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false });
+          .from('ai_generations')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false });
 
         if (error) {
           LoggerService.error('❌ Database query error:', error);
@@ -72,7 +89,7 @@ export default async function aiRoutes(fastify: FastifyInstance) {
 
         // Processar URLs para cada geração
         const generationsWithUrls = await Promise.all(
-          generations.map(async (generation) => {
+          (generations || []).map(async (generation: Generation) => {
             LoggerService.info('🖼️ Processing generation:', {
               id: generation.id,
               hasOutputUrls: !!generation.output_urls
@@ -96,14 +113,14 @@ export default async function aiRoutes(fastify: FastifyInstance) {
                     }
 
                     return signedUrl;
-                  } catch (error) {
+                  } catch (error: any) {
                     LoggerService.error('❌ URL signing error:', error);
                     return null;
                   }
                 })
               );
 
-              const validUrls = signedUrls.filter(url => url !== null);
+              const validUrls = signedUrls.filter((url): url is string => url !== null);
 
               return {
                 ...generation,
@@ -117,21 +134,21 @@ export default async function aiRoutes(fastify: FastifyInstance) {
         LoggerService.info('🎉 Generations processed successfully', {
           userId,
           totalCount: generationsWithUrls.length,
-          hasUrls: generationsWithUrls.some(g => g.urls?.length > 0)
+          hasUrls: generationsWithUrls.some((g: Generation & { urls?: string[] }) => g.urls?.length > 0)
         });
 
         return reply.send(generationsWithUrls);
 
-      } catch (error) {
+      } catch (error: any) {
         LoggerService.error('❌ Generation list error:', {
           userId,
-          error: error.message,
-          stack: error.stack
+          error: error?.message,
+          stack: error?.stack
         });
 
         return reply.code(500).send({
           error: 'fetch_failed',
-          message: error.message || 'Failed to fetch generations'
+          message: error?.message || 'Failed to fetch generations'
         });
       }
     }

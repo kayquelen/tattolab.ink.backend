@@ -1,5 +1,8 @@
-// backend/src/services/replicate.service.ts
 import { FastifyInstance } from 'fastify';
+import { Database } from '../types/database';
+
+type Generation = Database['public']['Tables']['ai_generations']['Row'];
+type GenerationInsert = Database['public']['Tables']['ai_generations']['Insert'];
 
 interface GenerateImageInput {
   prompt: string;
@@ -8,8 +11,17 @@ interface GenerateImageInput {
   negative_prompt?: string;
 }
 
+interface GenerationResponse {
+  success: boolean;
+  id: string;
+  urls: string[];
+  prompt: string;
+  status: 'completed';
+  created_at: string;
+}
+
 export class ReplicateService {
-  private MODEL = "fofr/sdxl-fresh-ink:8515c238222fa529763ec99b4ba1fa9d32ab5d6ebc82b4281de99e4dbdcec943";
+  private readonly MODEL = "fofr/sdxl-fresh-ink:8515c238222fa529763ec99b4ba1fa9d32ab5d6ebc82b4281de99e4dbdcec943" as const;
 
   constructor(private fastify: FastifyInstance) {
     console.log('ReplicateService initialized');
@@ -18,7 +30,7 @@ export class ReplicateService {
     console.log('Supabase available:', !!this.fastify.supabase);
   }
 
-  async generateImage(input: GenerateImageInput, userId: string) {
+  async generateImage(input: GenerateImageInput, userId: string): Promise<GenerationResponse> {
     console.log('=== Starting generateImage ===');
     console.log('Input:', JSON.stringify(input, null, 2));
     console.log('UserId:', userId);
@@ -30,26 +42,27 @@ export class ReplicateService {
     try {
       console.log('Creating initial database record...');
 
-      // Primeiro, criar o registro no banco com status 'pending'
+      const initialGeneration: GenerationInsert = {
+        user_id: userId,
+        prompt: input.prompt,
+        negative_prompt: input.negative_prompt,
+        width: input.width || 1024,
+        height: input.height || 1024,
+        refine: "expert_ensemble_refiner",
+        scheduler: "K_EULER",
+        lora_scale: 0.6,
+        num_outputs: 1,
+        guidance_scale: 7.5,
+        apply_watermark: false,
+        high_noise_frac: 0.9,
+        prompt_strength: 0.8,
+        num_inference_steps: 25,
+        status: 'pending'
+      };
+
       const { data: generation, error: dbError } = await this.fastify.supabase
         .from('ai_generations')
-        .insert({
-          user_id: userId,
-          prompt: input.prompt,
-          negative_prompt: input.negative_prompt,
-          width: input.width || 1024,
-          height: input.height || 1024,
-          refine: "expert_ensemble_refiner",
-          scheduler: "K_EULER",
-          lora_scale: 0.6,
-          num_outputs: 1,
-          guidance_scale: 7.5,
-          apply_watermark: false,
-          high_noise_frac: 0.9,
-          prompt_strength: 0.8,
-          num_inference_steps: 25,
-          status: 'pending'
-        })
+        .insert(initialGeneration)
         .select()
         .single();
 
@@ -64,40 +77,38 @@ export class ReplicateService {
       console.log('Starting Replicate generation...');
       console.log('Model:', this.MODEL);
 
-      // Gerar imagem com Replicate
+      const replicateInput = {
+        width: input.width || 1024,
+        height: input.height || 1024,
+        prompt: input.prompt,
+        refine: "expert_ensemble_refiner",
+        scheduler: "K_EULER",
+        lora_scale: 0.6,
+        num_outputs: 1,
+        guidance_scale: 7.5,
+        apply_watermark: false,
+        high_noise_frac: 0.9,
+        negative_prompt: input.negative_prompt || "ugly, broken, distorted, nsfw, inappropriate content",
+        prompt_strength: 0.8,
+        num_inference_steps: 25
+      };
+
       const output = await this.fastify.replicate.run(
         this.MODEL,
-        {
-          input: {
-            width: input.width || 1024,
-            height: input.height || 1024,
-            prompt: input.prompt,
-            refine: "expert_ensemble_refiner",
-            scheduler: "K_EULER",
-            lora_scale: 0.6,
-            num_outputs: 1,
-            guidance_scale: 7.5,
-            apply_watermark: false,
-            high_noise_frac: 0.9,
-            negative_prompt: input.negative_prompt || "ugly, broken, distorted, nsfw, inappropriate content",
-            prompt_strength: 0.8,
-            num_inference_steps: 25
-          }
-        }
+        { input: replicateInput }
       );
 
       console.log('Replicate output received:', output);
-      const output_urls = [];
+      const output_urls: string[] = [];
       let index = 0;
 
-      // Processar cada stream de output
-      console.log('Processing output streams...');
-      for (const stream of output) {
+      const outputArray = Array.isArray(output) ? output : [output];
+      for (const stream of outputArray) {
         console.log('Processing stream:', typeof stream);
         if (stream instanceof ReadableStream) {
           console.log('Stream is ReadableStream');
           const reader = stream.getReader();
-          const chunks = [];
+          const chunks: Uint8Array[] = [];
 
           while (true) {
             const { done, value } = await reader.read();
@@ -110,7 +121,6 @@ export class ReplicateService {
 
           console.log('Uploading to Storage:', filename);
 
-          // Upload para o Storage
           const { data: storageData, error: storageError } = await this.fastify.supabase
             .storage
             .from(this.fastify.config.supabase.storage.bucket)
@@ -127,11 +137,10 @@ export class ReplicateService {
 
           console.log('Upload successful:', storageData);
 
-          // Gerar URL assinada ao invés de pública
           const { data: { signedUrl } } = await this.fastify.supabase
             .storage
             .from(this.fastify.config.supabase.storage.bucket)
-            .createSignedUrl(filename, 60 * 60 * 24 * 7); // 7 dias de expiração
+            .createSignedUrl(filename, 60 * 60 * 24 * 7);
 
           console.log('Signed URL generated:', signedUrl);
           output_urls.push(signedUrl);
@@ -142,12 +151,11 @@ export class ReplicateService {
       console.log('All streams processed');
       console.log('Updating database record...');
 
-      // Atualizar registro com URLs e status
       const { data: updatedGeneration, error: updateError } = await this.fastify.supabase
         .from('ai_generations')
         .update({
           output_urls,
-          status: 'completed'
+          status: 'completed' as const
         })
         .eq('id', generationId)
         .select()
@@ -169,19 +177,18 @@ export class ReplicateService {
         created_at: updatedGeneration.created_at
       };
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('=== Generation failed ===');
       console.error('Error details:', error);
-      console.error('Stack trace:', error.stack);
+      console.error('Stack trace:', error?.stack);
 
-      // Se temos um ID de geração, atualizar com erro
       if (generationId) {
         console.log('Updating generation with error status...');
         await this.fastify.supabase
           .from('ai_generations')
           .update({
-            status: 'error',
-            error: error.message
+            status: 'failed' as const,
+            error: error?.message
           })
           .eq('id', generationId);
       }
@@ -190,7 +197,11 @@ export class ReplicateService {
     }
   }
 
-  async saveGeneration(params: any, userId: string, outputUrls: string[]) {
+  async saveGeneration(
+    params: GenerationInsert,
+    userId: string,
+    outputUrls: string[]
+  ): Promise<Generation> {
     const { data, error } = await this.fastify.supabase
       .from('ai_generations')
       .insert({

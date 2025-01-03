@@ -2,7 +2,7 @@ export const config = {
   port: process.env.PORT || 54976,
   host: process.env.HOST || '0.0.0.0',
   cors: {
-    origin: ['http://localhost:5173', 'http://localhost:3000'],
+    origin: ['http://localhost:5173', 'http://localhost:3000', 'https://www.tattoolab.ink'],
     credentials: true
   },
   supabase: {
