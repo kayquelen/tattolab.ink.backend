@@ -81,6 +81,14 @@ interface AuthError extends Error {
 }
 
 fastify.addHook('onRequest', async (request, reply) => {
+  // Lista de rotas públicas que não precisam de autenticação
+  const publicRoutes = ['/', '/health'];
+
+  // Verifica se a rota atual é pública
+  if (publicRoutes.includes(request.url)) {
+    return;
+  }
+
   try {
     const authHeader = request.headers.authorization;
     if (!authHeader) {
@@ -93,7 +101,7 @@ fastify.addHook('onRequest', async (request, reply) => {
     }
 
     console.log('Auth Header:', authHeader);
-    console.log('Extracted Token:', token);
+    console.log('Token:', token);
 
     const supabaseClient = createClient(
       config.supabase.url,
@@ -101,9 +109,6 @@ fastify.addHook('onRequest', async (request, reply) => {
     );
 
     const { data: { user }, error } = await supabaseClient.auth.getUser(token);
-
-    console.log('User:', user);
-    console.log('Error:', error);
 
     if (error || !user) {
       throw new Error('Invalid user token');
