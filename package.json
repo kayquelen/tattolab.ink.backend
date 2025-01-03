@@ -1,0 +1,37 @@
+{
+  "name": "tattoolab.ink-backend",
+  "version": "1.0.0",
+  "description": "Backend for Web Downloader",
+  "main": "src/server.ts",
+  "module": "src/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@fastify/formbody": "^8.0.1",
+    "@sinclair/typebox": "^0.31.28",
+    "@supabase/supabase-js": "^2.39.1",
+    "@types/cli-progress": "^3.11.6",
+    "axios": "^1.7.9",
+    "cli-progress": "^3.12.0",
+    "dotenv": "^16.3.1",
+    "esm": "^3.2.25",
+    "fastify": "^5.2.0",
+    "p-queue": "^7.4.1",
+    "replicate": "^1.0.1",
+    "winston": "^3.11.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
