@@ -4,10 +4,13 @@
   "description": "Backend for Web Downloader",
   "main": "dist/server.js",
   "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
-    "start": "node dist/server.js"
+    "build": "tsc && cp package.json dist/",
+    "start": "cd dist && node server.js"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
