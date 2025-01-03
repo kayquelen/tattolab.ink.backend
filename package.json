@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "node --experimental-modules dist/server.js"
+    "start": "node dist/server.js"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
