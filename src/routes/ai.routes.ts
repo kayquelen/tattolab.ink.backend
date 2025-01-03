@@ -1,13 +1,14 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { ReplicateService } from '../services/replicate.service.js';
 import { LoggerService } from '../services/logger.service.js';
-import { Database } from '../types/database';
+import type { Database } from '../types/database.types.js';
+import type { ReplicateInput } from '../services/replicate.service.js';
+import type { Generation, GenerationWithSignedUrls } from '../types/database.types.js';
 
 // Tipos para as requisições
-type Generation = Database['public']['Tables']['ai_generations']['Row'];
 type GenerationInput = Database['public']['Tables']['ai_generations']['Insert'];
 
-interface GenerateRequest {
+interface GenerateImageRequest {
   Body: {
     prompt: string;
     negative_prompt?: string;
@@ -41,14 +42,19 @@ export default async function aiRoutes(fastify: FastifyInstance) {
   const service = new ReplicateService(fastify);
 
   // Rota para gerar imagem
-  fastify.post<GenerateRequest>('/generate', {
+  fastify.post<GenerateImageRequest>('/generate', {
     schema: generateSchema,
     handler: async (request, reply) => {
       try {
         const userId = request.user.id;
-        LoggerService.info('Generate request received:', { userId, body: request.body });
+        const input: ReplicateInput = {
+          prompt: request.body.prompt,
+          negative_prompt: request.body.negative_prompt || undefined,
+          width: request.body.width,
+          height: request.body.height
+        };
 
-        const result = await service.generateImage(request.body as GenerationInput, userId);
+        const result = await service.generateImage(input, userId);
         return reply.send(result);
       } catch (error: any) {
         LoggerService.error('Generate route error:', error);
@@ -102,13 +108,13 @@ export default async function aiRoutes(fastify: FastifyInstance) {
                     const path = url.split('pages/')[1];
                     LoggerService.info('🔐 Creating signed URL for:', { path });
 
-                    const { data: { signedUrl }, error } = await fastify.supabase
+                    const { data, error } = await fastify.supabase
                       .storage
                       .from('pages')
                       .createSignedUrl(path, 60 * 60 * 24);
 
-                    if (error) {
-                      LoggerService.error('❌ Signed URL creation failed:', error);
+                    const signedUrl = data?.signedUrl;
+                    if (!signedUrl) {
                       return null;
                     }
 
@@ -120,7 +126,7 @@ export default async function aiRoutes(fastify: FastifyInstance) {
                 })
               );
 
-              const validUrls = signedUrls.filter((url): url is string => url !== null);
+              const validUrls = signedUrls.filter((url: string | null): url is string => url !== null);
 
               return {
                 ...generation,
@@ -134,7 +140,7 @@ export default async function aiRoutes(fastify: FastifyInstance) {
         LoggerService.info('🎉 Generations processed successfully', {
           userId,
           totalCount: generationsWithUrls.length,
-          hasUrls: generationsWithUrls.some((g: Generation & { urls?: string[] }) => g.urls?.length > 0)
+          hasUrls: generationsWithUrls.some((g: GenerationWithSignedUrls) => Boolean(g.urls?.length))
         });
 
         return reply.send(generationsWithUrls);

@@ -1,4 +1,4 @@
-import { Database } from '../types/database.types.js'
+import type { Database } from '../types/database.types.js'
 import { WebsiteService } from './website.service.js'
 import { LoggerService } from './logger.service.js'
 import { supabase } from '../lib/supabase.js'

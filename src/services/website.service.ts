@@ -1,4 +1,4 @@
-import { Database } from '../types/database.types.js'
+import type { Database } from '../types/database.types.js'
 import { LoggerService } from './logger.service.js'
 import { config } from '../config/env.js'
 import { DownloadProgress } from '../types/download.types.js'
@@ -27,7 +27,7 @@ export class WebsiteService {
   static async downloadWebsite(url: string, downloadId: string, userId: string): Promise<void> {
     const startTime = Date.now();
     const tempDir = await mkdtemp(join(tmpdir(), 'website-download-'));
-    
+
     // Initialize progress
     this.progressMap.set(downloadId, {
       totalFiles: 0,
@@ -114,7 +114,7 @@ export class WebsiteService {
         // Upload file to Supabase Storage
         try {
           const storagePath = `${userId}/downloads/${downloadId}/${filename}`;
-          
+
           LoggerService.info('Uploading file to storage', {
             downloadId,
             filename,
@@ -134,7 +134,7 @@ export class WebsiteService {
           // Update download record with storage path
           await supabase
             .from('downloads')
-            .update({ 
+            .update({
               status: 'completed',
               storage_path: storagePath
             })

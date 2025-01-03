@@ -1,10 +1,12 @@
 import { FastifyInstance } from 'fastify';
-import { Database } from '../types/database';
+import type { Database } from '../types/database.types.js';
+import { LoggerService } from './logger.service.js';
+
 
 type Generation = Database['public']['Tables']['ai_generations']['Row'];
 type GenerationInsert = Database['public']['Tables']['ai_generations']['Insert'];
 
-interface GenerateImageInput {
+export interface ReplicateInput {
   prompt: string;
   width?: number;
   height?: number;
@@ -30,7 +32,7 @@ export class ReplicateService {
     console.log('Supabase available:', !!this.fastify.supabase);
   }
 
-  async generateImage(input: GenerateImageInput, userId: string): Promise<GenerationResponse> {
+  async generateImage(input: ReplicateInput, userId: string): Promise<GenerationResponse> {
     console.log('=== Starting generateImage ===');
     console.log('Input:', JSON.stringify(input, null, 2));
     console.log('UserId:', userId);
@@ -45,18 +47,14 @@ export class ReplicateService {
       const initialGeneration: GenerationInsert = {
         user_id: userId,
         prompt: input.prompt,
-        negative_prompt: input.negative_prompt,
+        negative_prompt: input.negative_prompt || null,
         width: input.width || 1024,
         height: input.height || 1024,
-        refine: "expert_ensemble_refiner",
-        scheduler: "K_EULER",
-        lora_scale: 0.6,
         num_outputs: 1,
+        num_inference_steps: 50,
         guidance_scale: 7.5,
-        apply_watermark: false,
-        high_noise_frac: 0.9,
-        prompt_strength: 0.8,
-        num_inference_steps: 25,
+        apply_watermark: true,
+        disable_safety_checker: false,
         status: 'pending'
       };
 
@@ -137,13 +135,17 @@ export class ReplicateService {
 
           console.log('Upload successful:', storageData);
 
-          const { data: { signedUrl } } = await this.fastify.supabase
+          const { data, error } = await this.fastify.supabase
             .storage
-            .from(this.fastify.config.supabase.storage.bucket)
-            .createSignedUrl(filename, 60 * 60 * 24 * 7);
+            .from('pages')
+            .createSignedUrl(filename, 60 * 60 * 24);
 
-          console.log('Signed URL generated:', signedUrl);
-          output_urls.push(signedUrl);
+          if (data?.signedUrl) {
+            console.log('Signed URL generated:', data.signedUrl);
+            output_urls.push(data.signedUrl);
+          } else {
+            console.error('Failed to generate signed URL');
+          }
           index++;
         }
       }

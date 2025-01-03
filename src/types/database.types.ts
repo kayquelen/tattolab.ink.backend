@@ -1,10 +1,165 @@
 import { FastifyInstance } from 'fastify';
 import { ReplicateService } from '../services/replicate.service.js';
 import { LoggerService } from '../services/logger.service.js';
-import { Database } from '../types/database';
+import type { ReplicateInput } from '../services/replicate.service.js';
 
-type Generation = Database['public']['Tables']['generations']['Row'];
-type GenerationInput = Database['public']['Tables']['generations']['Insert'];
+export interface Database {
+  public: {
+    Tables: {
+      downloads: {
+        Row: {
+          id: string
+          user_id: string
+          url: string
+          status: 'pending' | 'processing' | 'completed' | 'failed'
+          storage_path: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          url: string
+          status?: 'pending' | 'processing' | 'completed' | 'failed'
+          storage_path?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          url?: string
+          status?: 'pending' | 'processing' | 'completed' | 'failed'
+          storage_path?: string
+          created_at?: string
+        }
+      }
+      files: {
+        Row: {
+          id: string
+          download_id: string
+          path: string
+          size: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          download_id: string
+          path: string
+          size: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          download_id?: string
+          path?: string
+          size?: number
+          created_at?: string
+        }
+      }
+      ai_generations: {
+        Row: {
+          id: string
+          created_at: string
+          user_id: string
+          mask: string | null
+          seed: number | null
+          image: string | null
+          width: number
+          height: number
+          prompt: string
+          negative_prompt: string | null
+          refine: string | null
+          scheduler: string | null
+          lora_scale: number | null
+          num_outputs: number
+          refine_steps: number | null
+          guidance_scale: number | null
+          apply_watermark: boolean
+          high_noise_frac: number | null
+          prompt_strength: number | null
+          num_inference_steps: number
+          disable_safety_checker: boolean
+          output_urls: string[]
+          status: string
+          error: string | null
+        }
+        Insert: {
+          id?: string
+          created_at?: string
+          user_id: string
+          mask?: string | null
+          seed?: number | null
+          image?: string | null
+          width: number
+          height: number
+          prompt: string
+          negative_prompt?: string | null
+          refine?: string | null
+          scheduler?: string | null
+          lora_scale?: number | null
+          num_outputs: number
+          refine_steps?: number | null
+          guidance_scale?: number | null
+          apply_watermark: boolean
+          high_noise_frac?: number | null
+          prompt_strength?: number | null
+          num_inference_steps: number
+          disable_safety_checker: boolean
+          output_urls?: string[]
+          status?: 'pending' | 'processing' | 'completed' | 'failed'
+          error?: string | null
+        }
+        Update: {
+          id?: string
+          created_at?: string
+          user_id?: string
+          mask?: string | null
+          seed?: number | null
+          image?: string | null
+          width?: number
+          height?: number
+          prompt?: string
+          negative_prompt?: string | null
+          refine?: string | null
+          scheduler?: string | null
+          lora_scale?: number | null
+          num_outputs?: number
+          refine_steps?: number | null
+          guidance_scale?: number | null
+          apply_watermark?: boolean
+          high_noise_frac?: number | null
+          prompt_strength?: number | null
+          num_inference_steps?: number
+          disable_safety_checker?: boolean
+          output_urls?: string[]
+          status?: 'pending' | 'processing' | 'completed' | 'failed'
+          error?: string | null
+        }
+      }
+    }
+  }
+}
+
+export type Generation = Database['public']['Tables']['ai_generations']['Row']
+export type GenerationInput = Database['public']['Tables']['ai_generations']['Insert']
+export interface GenerationWithSignedUrls extends Generation {
+  urls?: string[]
+}
+
+export interface GenerateImageInput {
+  prompt: string
+  negative_prompt: string | null
+  width: number
+  height: number
+  num_inference_steps: number
+  guidance_scale: number | null
+  high_noise_frac: number | null
+  apply_watermark: boolean
+  disable_safety_checker: boolean
+  num_outputs: number
+  refine?: string | null
+  scheduler?: string | null
+  lora_scale?: number | null
+}
 
 const generateSchema = {
   body: {
@@ -35,7 +190,14 @@ export default async function aiRoutes(fastify: FastifyInstance) {
         const userId = request.user.id;
         LoggerService.info('Generate request received:', { userId, body: request.body });
 
-        const result = await service.generateImage(request.body, userId);
+        const input: ReplicateInput = {
+          prompt: request.body.prompt,
+          negative_prompt: request.body.negative_prompt || undefined,
+          width: request.body.width,
+          height: request.body.height
+        };
+
+        const result = await service.generateImage(input, userId);
         return reply.send(result);
       } catch (error: any) {
         LoggerService.error('Generate route error:', error);
@@ -58,7 +220,7 @@ export default async function aiRoutes(fastify: FastifyInstance) {
         });
 
         const { data: generations, error } = await fastify.supabase
-          .from('generations')
+          .from('ai_generations')
           .select('*')
           .eq('user_id', userId)
           .order('created_at', { ascending: false });
@@ -89,13 +251,13 @@ export default async function aiRoutes(fastify: FastifyInstance) {
                     const path = url.split('pages/')[1];
                     LoggerService.info('🔐 Creating signed URL for:', { path });
 
-                    const { data: { signedUrl }, error } = await fastify.supabase
+                    const { data, error } = await fastify.supabase
                       .storage
                       .from('pages')
                       .createSignedUrl(path, 60 * 60 * 24);
 
-                    if (error) {
-                      LoggerService.error('❌ Signed URL creation failed:', error);
+                    const signedUrl = data?.signedUrl;
+                    if (!signedUrl) {
                       return null;
                     }
 
@@ -107,7 +269,7 @@ export default async function aiRoutes(fastify: FastifyInstance) {
                 })
               );
 
-              const validUrls = signedUrls.filter((url): url is string => url !== null);
+              const validUrls = signedUrls.filter((url: string | null): url is string => url !== null);
 
               return {
                 ...generation,
@@ -125,7 +287,7 @@ export default async function aiRoutes(fastify: FastifyInstance) {
         LoggerService.info('🎉 Generations processed successfully', {
           userId,
           totalCount: generationsWithUrls.length,
-          hasUrls: generationsWithUrls.some(g => g.urls?.length > 0)
+          hasUrls: generationsWithUrls.some((g: GenerationWithSignedUrls) => g.urls && g.urls.length > 0)
         });
 
         return reply.send(generationsWithUrls);
